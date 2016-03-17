@@ -31,7 +31,7 @@
 
 * Run initially to set up folder structure
 * Choose your folders to set up as the local macro `folders'
-	local folders RawData StataOutput ExcelOutput Documents
+	local folders Stata RawData StataOutput ExcelOutput Documents
 	foreach dir in `folders' {
 		confirmdir "`dir'"
 		if `r(confirmdir)'==170 {

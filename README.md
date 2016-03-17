@@ -1,6 +1,6 @@
 # Malawi Analysis
 
-Stata code for analyzing the Malawi 2010 DHS.
+Stata code for analyzing the Malawi 2010 DHS as well as other Expenditure Analysis data.
  
 ===  
 

@@ -12,7 +12,8 @@
 *  must be run each time Stata is opened
 	/* Choose the project path location to where you want the project parent 
 	   folder to go on your machine. Make sure it ends with a forward slash */
-	global projectpath "C:\Users\achafetz\Documents\GitHub\"
+	*global projectpath "C:\Users\achafetz\Documents\GitHub\"
+	global projectpath "/Users/Aaron/Desktop/"
 	cd "$projectpath"
 	
 * Run a macro to set up study folder

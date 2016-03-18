@@ -6,134 +6,81 @@
 
 
 /// CREATING A DHS WEALTH INDEX ///
-/*
-	source - http://www.dhsprogram.com/topics/wealth-index/Wealth-Index-Construction.cfm
-	Components
-	1. Domestic
-	2. Land
-	3. House
-*/
+*source - http://www.dhsprogram.com/topics/wealth-index/Wealth-Index-Construction.cfm
+	
+* INDICATOR CONSTRUCTION
 
-** SETUP 
-
-	*open female dataset
-		use v001 v002 v003 v150 v717 v740 s826a using "$data/mwir61fl.dta", clear //individual woman dataset
-	*create HH id
-		egen hhid = group(v001 v002) //cluster and HH		
-	*DOMESTIC
-	/*replace domstic servant variable if individual is unrelated to head of 
-		HH (v150==12) and occupation is "Household and domestic" (v717==6) */
-		tempvar dom_temp
-		gen `dom_temp' = 1 if v150==12 & v717==6
-		replace `dom_temp'=0 if v150!=. & v717!=. & `dom_temp'!=1
-		bysort hhid: egen domestic = max(`dom_temp')
-	*LAND
-	*set LAND =1 if the woman works her own or familyÕs land (v740==0 | 1)
-		tempvar land_temp
-		gen `land_temp' = 1 if inlist(v740,0,1)
-		replace `land_temp' = 0 if v740!=. & `land_temp'!=1
-		bysort hhid: egen land = max(`land_temp')
-	*HOUSE
-	/*If there is a country-specific item on ownership of dwelling in the 
-		individual womanÕs or menÕs individual questionnaire, set HOUSE = 1 */
-		tempvar house_temp
-		gen `house_temp' = 1 if inlist(s826a,0,1)
-		replace `house_temp' = 0 if s826a!=. & `house_temp'!=1
-		bysort hhid: egen house = max(`house_temp')
-	
-	*save female
-		keep v001 v002 v003 domestic land house
-		tempfile tempdata
-		save "`tempdata'", replace
-		
-	*open male dataset
-		use mv001 mv002 mv003 mv150 mv717 mv740 using "$data/mwmr61fl.dta", clear //individual male dataset
-	*create HH id
-		egen hhid = group(mv001 mv002) //cluster and HH		
-	*DOMESTIC
-	/*replace domstic servant variable if individual is unrelated to head of 
-		HH (v150==12) and occupation is "Household and domestic" (v717==6) */
-		tempvar dom_temp
-		gen `dom_temp' = 1 if mv150==12 & mv717==6
-		replace `dom_temp'=0 if mv150!=. & mv717!=. & `dom_temp'!=1
-		bysort hhid: egen domestic = max(`dom_temp')
-	*LAND
-	*set LAND =1 if the man works his own or familyÕs land (v740==0 | 1)
-		tempvar land_temp
-		gen `land_temp' = 1 if inlist(mv740,0,1)
-		replace `land_temp' = 0 if mv740!=. & `land_temp'!=1
-		bysort hhid: egen land = max(`land_temp')
-	*HOUSE
-	/*If there is a country-specific item on ownership of dwelling in the 
-		individual womanÕs or menÕs individual questionnaire, set HOUSE = 1 */
-		*n/a - missing owns house variable
-	*rename variables
-		rename (mv001 mv002 mv003) (v001 v002 v003)
-	*save male
-		keep v001 v002 v003 domestic land 
-	
-	*MERGE
-		append using "`tempdata'"
-		*create HH id
-		egen hhid = group(v001 v002) //cluster and HH	
-		*create variable combining male and female
-		foreach x in domestic land house {
-			bysort hhid: egen `x'_n = max(`x')
-			drop `x'
-			rename `x'_n `x'
-			}
-			*end
-		*collapse to hh
-			collapse (max) domestic land house, by(v001 v002)
-		save "$output/assets_major_temp.dta",replace
-	
-* Indicator Construction
-	*open HH data
+	*open HH data (use only select variables to open in Stata/SE)
 		use hhid hv001 hv002 hv003 hv025 hv005 hv009 hv012 hv013 hv015 ///
 			hv201 hv205-hv216 hv221 hv225 hv226 hv243* hv245 hv246* hv247 ///
 			sh111* using "$data/mwhr61fl.dta", clear	
+	
 	*select only interviewed households (hv015==1)
-		tab hv015 //all
-	*land farmed
+		qui: tab hv015
+		assert `r(r)' == 1 // will only have 1 row (completed)
+	
+	*residence- urban v rural
+		gen urban = 0
+			replace urban = 1 if hv025==1
+			lab def urban 0 "rural" 1 "urban"
+			lab val urban urban
+			lab var urban "Urban residence?"
+		
+	* total hectares of agricultural land owned
 		clonevar agland = hv245
-			recode agland (99 = .) (98 =.a) // note 95 = 95ha or more
+			recode agland (99 = .) (98 =.a) // 
+			note agland: if >= 95ha, coded as 95ha
+
 	*number of members per sleeping room
-		clonevar sleepingrooms = hv216
-			recode sleepingrooms (0 = 1) (99 =.)
-		gen sleepnum = hv012/sleepingrooms
+		tab hv012 //check to see if in any HH de jure ==0  -> use de facto
+		tab hv013 if hv012==0
+		clonevar members = hv012 
+			replace members = hv013 if hv012==0
+			qui: sum hv012 if hv012==0 //use for N in note below
+			note members: HH de jure members; where de jure==0, replaced ///
+				with de facto (n=`r(N)'/ 24,825 )
+		clonevar temp_sleepingrooms = hv216
+			recode temp_sleepingrooms (0 99 = 1) //recode any reporting 0 rooms to 1
+		gen sleepnum = members/temp_sleepingrooms
 			lab var sleepnum  "number of members per sleeping room"
-	/*Source of drinking water—each category is a separate indicator variable 
-		except that surface water sources (lakes, ponds, rivers, streams, etc.)
-		is combined into one indicator variable if they are separate categories.*/
-		tab hv201
-		clonevar water = hv201
-			recode water (51/71 = 96) (99=.)
-		tab water
-		tab water, gen(water_) 
+	*how much livestock does the HH own?
+		local livestock cattle goats sheep pultry pigs other
+		local i 1
+		foreach n of varlist hv246a hv246d-hv246g hv246k{
+			local l : word `i' of `livestock'
+			clonevar `l' = `n' if `n'!=98 | `n'!=99
+			note `l': `l' max possible to report = 95
+			local i = `i' + 1
+			}
+			*end		
+	*source of drinking water
+		clonevar temp_water = hv201
+			recode temp_water (51/71 = 96) (99=.) //rainwater & bottled water categorized as other
+		tab temp_water, gen(water_) 
 			rename water_* ///
 				(water_piped_dwelling water_piped_yard water_public ///
 				water_borehole water_well_protected water_well_unprotected ///
 				water_spring_protected water_spring_unprotected water_river ///
 				water_other)
 		
-	*Type of toilet and sharing of toilets
+	*Type of toilet (hv205) and if shared (hv225) 
 		tab hv205 hv225, m
-		clonevar toilet = hv205 
-			recode toilet (41/43 = 96) (99 = .) 
+		clonevar temp_toilet = hv205 
+			recode temp_toilet (41/43 = 96) (99 = .) //recode composting & hanging to other
 		local i = 0
 		foreach t in "" "_sh"{
-			tab toilet if hv225==`i' & toilet<31, gen(toilet`t'_)
+			tab temp_toilet if hv225==`i' & temp_toilet<31, gen(toilet`t'_)
 			rename toilet`t'_* (toilet`t'_flush toilet`t'pit_vip ///
 				toilet`t'_pit_slab toilet`t'_pit_open )
 			local i = `i' + 1 		
 			}
 			*end
 		gen toilet_bush=0
-			replace toilet_bush=1 if toilet==31
+			replace toilet_bush=1 if temp_toilet==31
 		gen toilet_other=0
-			replace toilet_other=1 if toilet==96
+			replace toilet_other=1 if temp_toilet==96
 	
-	*other goods
+	*does HH own certain goods?
 		local good electric radio tv fridge bicycle motorcycle car landline ///
 			mobilephone watch cart bank koloboyi paraffin bed sofaset table
 		local i 1
@@ -143,38 +90,53 @@
 			local i = `i' + 1
 			}
 			*end
-	*house
-		clonevar floor = hv213  
-			recode floor (31/33 35 = 30) (21/23 = 96) (99 = .)
-		tab floor, gen(floor_)
+	*floor type
+		clonevar temp_floor = hv213  
+			recode temp_floor (31/33 35 = 30) (21/23 = 96) (99 = .)
+		tab temp_floor, gen(floor_)
 			rename floor_* (floor_natrl floor_dung floor_finished ///
 			floor_cement floor_other)
-		clonevar wall = hv214
-			recode wall (11 = 12) (24 26 = 20)(34 = 32) (35=33) (36 = 96) (99=.)
+	*wall type
+		clonevar temp_wall = hv214
+			recode temp_wall (11 = 12) (24 26 = 20)(34 = 32) (35=33) (36 = 96) (99=.)
 			lab copy hv214 wall
-			lab val wall wall
+			lab val temp_wall wall
 			lab def wall 12 "cane/palm/trunks/no walls" ///
 				32 "stone w/ cement or unburnt bricks" ///
 				33 "burnt bricks or cement blocks", modify
-		tab wall, gen(wall_)
+		tab temp_wall, gen(wall_)
 			rename wall_* (wall_cane wall_dirt wall_rudmat wall_bamboo ///
 				wall_stone_mud wall_cement wall_cementunburntbricks ///
 				wall_burntbricks wall_other)
-		clonevar roof = hv215
-			recode roof (11 96 99= .) (13 = 12) (21/24 = 20) (31/36 =30)
+	*roof type
+		clonevar temp_roof = hv215
+			recode temp_roof (11 96 99= .) (13 = 12) (21/24 = 20) (31/36 =30)
 			lab def hv215 12 "thatch/palm/sod", modify
-		tab roof, gen(roof_)
+		tab temp_roof, gen(roof_)
 			rename roof_* (roof_thatch roof_rudmat roof_finished)
-	*cooking
-		clonevar cooking = hv226
-			recode cooking (11 = 9) (6 = 7) (2/5 96 = 8) (99=.)
+	*cooking fuel
+		clonevar temp_cooking = hv226
+			recode temp_cooking (11 = 9) (6 = 7) (2/5 96 = 8) (99=.)
 			lab copy hv226 cooking
 			lab def cooking 9 "straw/shrubs/grass/dung"  ///
 				7 "charcoal or lignite/coal for cooking" ///
 				8 "wood, other for cooking fuel", modify
-		tab cooking, gen(cooking_)
-			rename cooking_* (cooking_electric cooking_natural cooking_charcoal ///
-				cooking_wood cooking_nofood)
-		
-		
+		tab temp_cooking, gen(cooking_)
+			rename cooking_* (cooking_electric cooking_charcoal cooking_wood ///
+				cooking_straw cooking_nofood)
+	*keep only ids and variables created
+		drop members temp_* 
+		keep hhid-hv005 agland-cooking_nofood
+	*recode all missings as zero
+		recode water_piped_dwelling-cooking_nofood (.=0) 
+	*create yes no label
+		lab drop _all
+		lab def yn 0 "no" 1 "yes"
+		lab val water_piped_dwelling-cooking_nofood	yn
 	
+	
+* DESCRIPTIVE STATS
+	tabstat agland-cooking_nofood, stat(mean sd n) col(stat)
+	
+* PRINCIPLE COMPONENTS ANALYSIS
+	factor agland-cooking_nofood, pcf
